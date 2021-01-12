@@ -18,6 +18,7 @@ class Namespace(Enum):
 class Realm:
     id: int
     name: str
+    slug: str
 
 @dataclass
 class ConnectedRealm:
@@ -32,7 +33,7 @@ class Item:
 
 @dataclass
 class ItemStack:
-    count: int
+    count: float
     item_id: int
 
 @dataclass
@@ -99,7 +100,7 @@ class WoWAPI:
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
         resp_data = resp.json()
-        realms = [Realm(realm["id"], realm["name"]) for realm in resp_data["realms"]]
+        realms = [Realm(realm["id"], realm["name"], realm["slug"]) for realm in resp_data["realms"]]
         return ConnectedRealm(realm_id, realms)
     
     def load_realms(self) -> List[ConnectedRealm]:
@@ -127,3 +128,42 @@ class WoWAPI:
             prof.tiers = {t.id: t for t in self.load_profession_tiers(prof.id)}
         return profs
     
+    def load_recipe_list(self, profession_id: int, tier_id: int) -> List[Recipe]:
+        url = self.__construct_url(f"/data/wow/profession/{profession_id}/skill-tier/{tier_id}", Namespace.STATIC)
+        resp: req.Response = req.get(url)
+        assert resp.status_code == 200
+        resp_data = resp.json()
+        if "categories" not in resp_data:
+            return []
+        result: List[Recipe] = []
+        for cat in resp_data["categories"]:
+            cat_name = cat["name"]
+            result.extend([Recipe(r["id"], cat_name, r["name"], profession_id, tier_id, None, []) for r in cat["recipes"]])
+        return result
+    
+    def load_recipe_data(self, recipe: Recipe) -> Recipe:
+        url = self.__construct_url(f"/data/wow/recipe/{recipe.id}", Namespace.STATIC)
+        resp: req.Response = req.get(url)
+        assert resp.status_code == 200
+        resp_data = resp.json()
+        if "crafted_item" not in resp_data:
+            return None
+        q_data = resp_data["crafted_quantity"]
+        quantity = q_data["value"] if "value" in q_data \
+             else (q_data["maximum"] - q_data["minimum"]) / 2 + q_data["minimum"]
+        recipe.crafted_item = ItemStack(quantity, resp_data["crafted_item"]["id"])
+        recipe.reagents = [ItemStack(rg["quantity"], rg["reagent"]["id"]) for rg in resp_data["reagents"]]
+        return recipe
+    
+    def load_recipes(self, profession_id: int, tier_id: int) -> List[Recipe]:
+        result = self.load_recipe_list(profession_id, tier_id)
+        for r in result:
+            self.load_recipe_data(r)
+        return result
+    
+    def load_item(self, item_id: int) -> Item:
+        url = self.__construct_url(f"/data/wow/item/{item_id}", Namespace.STATIC)
+        resp: req.Response = req.get(url)
+        assert resp.status_code == 200
+        resp_data = resp.json()
+        return Item(item_id, resp_data["name"], resp_data["purchase_price"])

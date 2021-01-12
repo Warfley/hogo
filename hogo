@@ -3,7 +3,7 @@
 import yaml
 from argparse import ArgumentParser
 from config import add_default_config_args, init_config_parser, handle_config_command, Config
-from data import init_data_parser, handle_data_command
+from data import init_update_parser, handle_update_command
 from pathlib import Path
 
 def main():
@@ -14,10 +14,10 @@ def main():
     config_parser = parsers.add_parser("config", help="Reads and writes the global config data")
     init_config_parser(config_parser)
     
-    data_parser = parsers.add_parser("data", help="Manages static game data (realms, professions, items)")
-    init_data_parser(data_parser)
+    update_parser = parsers.add_parser("update", help="Updates static game data ")
+    init_update_parser(update_parser)
 
-    args = parser.parse_args()
+    args = parser.parse_args(["update", "realms"])
 
     config = Config()
     config.load()
@@ -30,8 +30,8 @@ def main():
         print("Invalid config, call hogo config init first")
         exit(1)
     
-    if args.command == "data":
-        handle_data_command(args, config)
+    if args.command == "update":
+        handle_update_command(args, config)
 
 
 if __name__=="__main__":
