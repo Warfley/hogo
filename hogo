@@ -2,8 +2,10 @@
 
 import yaml
 from argparse import ArgumentParser
-from config import add_default_config_args, init_config_parser, handle_config_command, Config
+from config import Config
+from config_command import add_default_config_args, handle_config_command, init_config_parser
 from data import init_update_parser, handle_update_command
+from auctions import init_auction_parser, handle_auction_command
 from pathlib import Path
 
 def main():
@@ -17,7 +19,11 @@ def main():
     update_parser = parsers.add_parser("update", help="Updates static game data ")
     init_update_parser(update_parser)
 
-    args = parser.parse_args(["update", "realms"])
+    auctions_parser = parsers.add_parser("auctions", help="Compute AH information")
+    init_auction_parser(auctions_parser)
+
+
+    args = parser.parse_args()
 
     config = Config()
     config.load()
@@ -29,9 +35,13 @@ def main():
     if not config.validate:
         print("Invalid config, call hogo config init first")
         exit(1)
-    
+    ret = 0
     if args.command == "update":
-        handle_update_command(args, config)
+        ret = handle_update_command(args, config)
+    elif args.command == "auctions":
+        ret = handle_auction_command(args, config)
+    
+    exit(ret)
 
 
 if __name__=="__main__":

@@ -58,6 +58,33 @@ class Profession:
     name: str
     tiers: Dict[int, ProfessionTier]
 
+@dataclass
+class ItemModifier:
+    key: int
+    value: int
+
+@dataclass
+class PetInfo:
+    breed_id: int
+    level: int
+    quality_id: int
+    species_id: int
+
+@dataclass
+class AuctionHouseItem:
+    id: int
+    bonus_lists: List[int]
+    modifiers: List[ItemModifier]
+    pet_info: PetInfo
+
+@dataclass
+class Auction:
+    id: int
+    price: int
+    quantity: int
+    time_left: str
+    item: AuctionHouseItem
+
 class WoWAPI:
     def __init__(self, conf: Config):
         self.conf: Config = conf
@@ -167,3 +194,25 @@ class WoWAPI:
         assert resp.status_code == 200
         resp_data = resp.json()
         return Item(item_id, resp_data["name"], resp_data["purchase_price"])
+    
+    def load_auctions(self, connected_realm_id: int) -> List[Auction]:
+        url = self.__construct_url(f"/data/wow/connected-realm/{connected_realm_id}/auctions", Namespace.DYNAMIC)
+        resp: req.Response = req.get(url)
+        assert resp.status_code == 200
+        resp_data = resp.json()
+        result = []
+        for auction_data in resp_data["auctions"]:
+            if not "buyout" in auction_data:
+                continue # only support direct buy auctions
+            item_data: dict = auction_data["item"]
+            bonus_lists = item_data.get("bonus_lists", [])
+            modifiers = [ItemModifier(m["type"], m["value"]) for m in item_data.get("modifiers", [])]
+            pet_info = PetInfo(item_data["pet_breed_id"], item_data["pet_level"], 
+                               item_data["pet_quality_id"], item_data["pet_species_id"]) if "pet_level" in item_data \
+                        else None
+            item = AuctionHouseItem(item_data["id"], bonus_lists, modifiers, pet_info)
+            auction = Auction(auction_data["id"], auction_data["buyout"], 
+                              auction_data["quantity"], auction_data["time_left"],
+                              item)
+            result.append(auction)
+        return result

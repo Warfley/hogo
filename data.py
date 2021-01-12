@@ -65,10 +65,30 @@ class DataService:
         self.data_dir = data_dir/f"{config['server.region']}.{config['data.language']}"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.api = WoWAPI(config)
-        self.realms: Dict[int, ConnectedRealm] = self.__load_realms()
-        self.professions: Dict[int, Profession] = self.__load_professions()
-        self.recipes: Dict[int, Recipe] = self.__load_recipes()
-        self.items = {}
+        self.__realms: Dict[int, ConnectedRealm] = {}
+        self.__professions: Dict[int, Profession] = {}
+        self.__recipes: Dict[int, Recipe] = {}
+        self.__items: Dict[int, Item] = {}
+    
+    def get_realms(self) -> Dict[int, ConnectedRealm]:
+        if self.__realms == {}:
+            self.__realms = self.__load_realms()
+        return self.__realms
+
+    def get_professions(self) -> Dict[int, Profession]:
+        if self.__professions == {}:
+            self.__professions = self.__load_professions()
+        return self.__professions
+
+    def get_recipes(self) -> Dict[int, Recipe]:
+        if self.__recipes == {}:
+            self.__recipes = self.__load_recipes()
+        return self.__recipes
+
+    def get_items(self) -> Dict[int, Item]:
+        if self.__items == {}:
+            self.__items = self.__load_items()
+        return self.__items
 
     def __load_realms(self) -> Dict[int, ConnectedRealm]:
         realm_file = self.data_dir/"realms.yml"
@@ -81,7 +101,7 @@ class DataService:
     def __store_realms(self) -> None:
         realm_file = self.data_dir/"realms.yml"
         with open(realm_file, "w") as fl:
-            raw_data = [serialize_connected_realm(r) for r in self.realms.values()]
+            raw_data = [serialize_connected_realm(r) for r in self.__realms.values()]
             yaml.dump(raw_data, fl)
     
     def __load_professions(self) -> Dict[int, Profession]:
@@ -95,7 +115,7 @@ class DataService:
     def __store_professions(self) -> None:
         profession_file = self.data_dir/"professions.yml"
         with open(profession_file, "w") as fl:
-            raw_data = [serialize_profession(p) for p in self.professions.values()]
+            raw_data = [serialize_profession(p) for p in self.__professions.values()]
             yaml.dump(raw_data, fl)
     
     def __load_recipes(self) -> Dict[int, Recipe]:
@@ -109,7 +129,7 @@ class DataService:
     def __store_recipes(self) -> None:
         recipe_file = self.data_dir/"recipes.yml"
         with open(recipe_file, "w") as fl:
-            raw_data = [serialize_recipe(r) for r in self.recipes.values()]
+            raw_data = [serialize_recipe(r) for r in self.__recipes.values()]
             yaml.dump(raw_data, fl)
 
     def __load_items(self) -> Dict[int, Item]:
@@ -123,38 +143,38 @@ class DataService:
     def __store_items(self) -> None:
         item_file = self.data_dir/"items.yml"
         with open(item_file, "w") as fl:
-            raw_data = [serialize_item(i) for i in self.items.values()]
+            raw_data = [serialize_item(i) for i in self.__items.values()]
             yaml.dump(raw_data, fl)
 
     def update_realms(self) -> None:
         self.api.generate_token()
         realms = self.api.load_realms()
-        self.realms = {r.id: r for r in realms}
+        self.__realms = {r.id: r for r in realms}
         self.__store_realms()
     
     def update_professions(self) -> None:
         self.api.generate_token()
         professions = self.api.load_professions()
-        self.professions = {p.id: p for p in professions}
+        self.__professions = {p.id: p for p in professions}
         self.__store_professions()
     
     def update_recipes(self, profession_tiers: List[Tuple[int, int]]) -> None:
         self.api.generate_token()
-        self.recipes = {}
+        self.__recipes = {}
         for prof, tier in profession_tiers:
             recipes = self.api.load_recipes(prof, tier)
-            self.recipes.update({r.id: r for r in recipes})
+            self.__recipes.update({r.id: r for r in recipes})
         self.__store_recipes()
     
     def __update_item(self, item_id: int) -> None:
-        if item_id in self.items:
+        if item_id in self.__items:
             return
-        self.items[item_id] = self.api.load_item(item_id)
+        self.__items[item_id] = self.api.load_item(item_id)
 
     def update_items(self) -> None:
         self.api.generate_token()
-        self.items = {}
-        for recipe in self.recipes.values():
+        self.__items = {}
+        for recipe in self.get_recipes().values():
             if recipe.crafted_item is not None:
                 self.__update_item(recipe.crafted_item.item_id)
             for reagent in recipe.reagents:
@@ -162,28 +182,28 @@ class DataService:
         self.__store_items()
 
     def clear_realms(self) -> None:
-        self.realms = {}
+        self.__realms = {}
         realm_file = self.data_dir/"realms.yml"
         realm_file.unlink()
 
     def clear_professions(self) -> None:
-        self.professions = {}
+        self.__professions = {}
         profession_file = self.data_dir/"professions.yml"
         profession_file.unlink()
     
     def clear_recipes(self) -> None:
-        self.recipes = {}
+        self.__recipes = {}
         recipe_file = self.data_dir/"recipes.yml"
         recipe_file.unlink()
     
     def clear_items(self) -> None:
-        self.items = {}
+        self.__items = {}
         item_file = self.data_dir/"items.yml"
         item_file.unlink()
     
     def latest_professions(self) -> List[Tuple[int, int]]:
         result = []
-        for prof in self.professions.values():
+        for prof in self.get_professions().values():
             if len(prof.tiers) > 0:
                 tier: ProfessionTier = sorted(prof.tiers.values(), key=lambda t: t.id)[-1]
                 result.append((prof.id, tier.id))
@@ -191,25 +211,43 @@ class DataService:
     
     def all_professions(self) -> List[Tuple[int, int]]:
         result = []
-        for prof in self.professions.values():
+        for prof in self.get_professions().values():
             result.extend([(prof.id, tier.id) for tier in prof.tiers.values()])
         return result
     
     def config_professions(self) -> List[Tuple[int, int]]:
-        prof_conf = self.config["data.professions"]
-        if prof_conf is None:
-            return []
         result = []
-        for prof_tier in prof_conf:
+        for prof_tier in self.config.get_or_default("data.professions", []):
             pt = prof_tier.split("-")
             prof = int(pt[0])
             tier = int(pt[1])
             result.append((prof, tier))
         return result
+    
+    def find_profession_tier(self, name: str) -> Tuple[int, int]:
+        for prof in self.get_professions().values():
+            for tier in prof.tiers.values():
+                if tier.name == name:
+                    return prof.id, tier.id
+        return None, None
+    
+    def find_item(self, name:str) -> int:
+        for item in self.get_items().values():
+            if item.name == name:
+                return item.id
+        return None
+
+    def find_realm(self, slug: str) -> Tuple[int, int]:
+        for cr in self.get_realms().values():
+            for r in cr.realms:
+                if r.slug == slug:
+                    return cr.id, r.id
+        return None, None
 
 def init_update_parser(parser: ArgumentParser) -> None:
     parsers = parser.add_subparsers(dest="target")
-    parsers.add_parser("all", help="Update all data (default)")
+    all_parser = parsers.add_parser("all", help="Update all data (default)")
+    all_parser.add_argument("--professions", type=str, choices=["all", "latest", "config"], default="latest", help="Professions to load recipes from (default latest)")
     parsers.add_parser("realms", help="Update realm list")
     parsers.add_parser("professions", help="Update profession list")
     recipe_parser = parsers.add_parser("recipes", help="Update recipe list")
@@ -245,9 +283,7 @@ def handle_update_command (args, config: Config) -> int:
         data.update_professions()
         print("done")
         print("Updating recipes...", end=" ", flush=True)
-        prof_tiers = data.all_professions() if args.profession == "all" \
-                else data.config_professions if args.profession == "config" \
-                else data.latest_professions()
+        prof_tiers = data.latest_professions()
         data.update_recipes(prof_tiers)
         print("done")        
         print("Updating items...", end=" ", flush=True)
