@@ -23,7 +23,7 @@ def main():
     init_auction_parser(auctions_parser)
 
 
-    args = parser.parse_args()
+    args = parser.parse_args(["auctions", "profit"])
 
     config = Config()
     config.load()

@@ -1,7 +1,7 @@
 import requests as req
 from config import Config
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Tuple, Dict
 from urllib import parse
 
 from enum import Enum
@@ -50,13 +50,12 @@ class Recipe:
 class ProfessionTier:
     id: int
     name: str
-    recipes: Dict[int, Recipe]
 
 @dataclass
 class Profession:
     id: int
     name: str
-    tiers: Dict[int, ProfessionTier]
+    tiers: List[ProfessionTier]
 
 @dataclass
 class ItemModifier:
@@ -146,13 +145,13 @@ class WoWAPI:
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
         resp_data = resp.json()
-        return [ProfessionTier(pt["id"], pt["name"], {}) for pt in resp_data["skill_tiers"]] \
+        return [ProfessionTier(pt["id"], pt["name"]) for pt in resp_data["skill_tiers"]] \
             if "skill_tiers" in resp_data else []
 
     def load_professions(self) -> List[Profession]:
         profs = self.load_profession_list()
         for prof in profs:
-            prof.tiers = {t.id: t for t in self.load_profession_tiers(prof.id)}
+            prof.tiers = self.load_profession_tiers(prof.id)
         return profs
     
     def load_recipe_list(self, profession_id: int, tier_id: int) -> List[Recipe]:
@@ -202,7 +201,7 @@ class WoWAPI:
         resp_data = resp.json()
         result = []
         for auction_data in resp_data["auctions"]:
-            if not "buyout" in auction_data:
+            if "buyout" not in auction_data and "unit_price" not in auction_data:
                 continue # only support direct buy auctions
             item_data: dict = auction_data["item"]
             bonus_lists = item_data.get("bonus_lists", [])
@@ -211,8 +210,10 @@ class WoWAPI:
                                item_data["pet_quality_id"], item_data["pet_species_id"]) if "pet_level" in item_data \
                         else None
             item = AuctionHouseItem(item_data["id"], bonus_lists, modifiers, pet_info)
-            auction = Auction(auction_data["id"], auction_data["buyout"], 
-                              auction_data["quantity"], auction_data["time_left"],
+            quantity = auction_data["quantity"]
+            price = auction_data["buyout"] / quantity if "buyout" in auction_data \
+               else auction_data["unit_price"]
+            auction = Auction(auction_data["id"], price, quantity, auction_data["time_left"],
                               item)
             result.append(auction)
         return result
