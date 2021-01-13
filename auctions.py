@@ -260,6 +260,8 @@ def __compute_production_costs(crafted_items: Dict[int, Recipe], item_cache: Dic
         computed.add(iid)
         if total_costs < 0: # at least one reagent is unobtainable
             continue
+        # compute the costs per unit
+        total_costs = round(total_costs / recipe.crafted_item.count)
         # the result
         result[iid] = total_costs
         # if this is cheaper than buying, make this the default method of obtaining this

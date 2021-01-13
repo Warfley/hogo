@@ -37,6 +37,16 @@ def init_config_parser(parser: ArgumentParser) -> None:
     vendor_parser.add_argument("action", type=str, choices=["add", "delete"])
     vendor_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
 
+    buy_parser = parsers.add_parser("buyitems", help="Configure the auctions.buy property, requires updated item data")
+    buy_parser.add_argument("action", type=str, choices=["add", "delete"])
+    buy_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
+    ignore_parser = parsers.add_parser("ignoreitems", help="Configure the auctions.ignore property, requires updated item data")
+    ignore_parser.add_argument("action", type=str, choices=["add", "delete"])
+    ignore_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
+    specific_parser = parsers.add_parser("specificitems", help="Configure the auctions.specific property, requires updated item data")
+    specific_parser.add_argument("action", type=str, choices=["add", "delete"])
+    specific_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
+
 def handle_config_command(args, config: Config) -> int:
     new_config: Config = None
     if args.subcommand == "init":
@@ -81,6 +91,11 @@ def handle_config_command(args, config: Config) -> int:
             new_config = __add_vendor_items(args.items, config)
         else:
             new_config = __delete_vendor_items(args.items, config)
+    elif args.subcommand in ["buyitems", "specificitems", "ignoreitems"]:
+        if args.action == "add":
+            new_config = __add_auction_items(args.items, config, args.subcommand[:-5])
+        else:
+            new_config = __delete_auction_items(args.items, config, args.subcommand[:-5])
     else:
         return 1
     if new_config is not None:
@@ -170,4 +185,32 @@ def __delete_vendor_items(items: List[str], config: Config) -> Config:
             continue
         prev.remove(iid)
     result["data.vendor_items"] = list(prev)
+    return result
+
+def __add_auction_items(items: List[str], config: Config, command: str) -> Config:
+    data = DataService(config)
+    result = Config()
+    result.load()
+    prev = set(result.get_or_default(f"auctions.{command}", []))
+    for item in items:
+        iid = data.find_item(item)
+        if iid is None:
+            print(f"Can't find item {item}... skipping")
+            continue
+        prev.add(iid)
+    result[f"auctions.{command}"] = list(prev)
+    return result
+
+def __delete_auction_items(items: List[str], config: Config, command: str) -> Config:
+    data = DataService(config)
+    result = Config()
+    result.load()
+    prev = set(result.get_or_default(f"auctions.{command}", []))
+    for item in items:
+        iid = data.find_item(item)
+        if iid is None:
+            print(f"Can't find item {item}... skipping")
+            continue
+        prev.remove(iid)
+    result[f"auctions.{command}"] = list(prev)
     return result
