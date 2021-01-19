@@ -1,13 +1,15 @@
 import requests as req
 from config import Config
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Union, Iterable
 from urllib import parse
 
 from enum import Enum
 from dataclasses import dataclass
 
 import re
+
+ParameterList = Union[Dict[str, str], Iterable[Tuple[str, str]]]
 
 class Namespace(Enum):
     STATIC="static"
@@ -45,6 +47,8 @@ class Recipe:
     tier_id: int
     crafted_item: ItemStack
     reagents: List[ItemStack]
+    # shadowlands specifics
+    legendary_level: int = None
 
 @dataclass
 class ProfessionTier:
@@ -97,14 +101,15 @@ class WoWAPI:
         resp_data = resp.json()
         self.token = resp_data["access_token"]
     
-    def __construct_url(self, path: str, namespace: Namespace, params: Dict[str, str] = {}) -> str:
-        extended_params: Dict[str, str] = params.copy()
-        extended_params.update({
-            "locale": self.conf["data.language"],
-            "namespace": f"{namespace.value}-{self.conf['server.region']}",
-            "access_token": self.token
-        })
-        param_list = [f"{parse.quote(key)}={parse.quote(value)}" for key, value in extended_params.items()]
+    def __construct_url(self, path: str, namespace: Namespace, params: ParameterList = {}) -> str:
+        extended_params: List[Tuple[str, str]] = [(key, value) for key, value in 
+                                                  (params.items() if isinstance(params, dict) else params)]
+        extended_params.extend([
+            ("locale", self.conf["data.language"]),
+            ("namespace", f"{namespace.value}-{self.conf['server.region']}"),
+            ("access_token", self.token)
+        ])
+        param_list = [f"{parse.quote(key)}={parse.quote(value)}" for key, value in extended_params]
         return f"https://{self.conf['server.region']}.api.blizzard.com{path}?{'&'.join(param_list)}"
 
     def load_connected_realm_list(self) -> List[int]:
@@ -163,8 +168,21 @@ class WoWAPI:
             return []
         result: List[Recipe] = []
         for cat in resp_data["categories"]:
+            # Shadowlands specifics
+            by_name: Dict[str, List[Recipe]] = {}
             cat_name = cat["name"]
-            result.extend([Recipe(r["id"], cat_name, r["name"], profession_id, tier_id, None, []) for r in cat["recipes"]])
+            # non shadowlands:
+            # result.extend([Recipe(r["id"], cat_name, r["name"], profession_id, tier_id, None, []) for r in cat["recipes"]])
+            # Shadowlands: detect legendaries
+            for recipe_data in cat["recipes"]:
+                recipe = Recipe(recipe_data["id"], cat_name, recipe_data["name"], profession_id, tier_id, None, [])
+                recipe_list = by_name.get(recipe.name, [])
+                recipe_list.append(recipe)
+                by_name[recipe.name] = recipe_list
+                result.append(recipe)
+            for legendaries in [lst for lst in by_name.values() if len(lst) > 1]:
+                for lvl, legendary in enumerate(sorted(legendaries, key=lambda r: r.id)):
+                    legendary.legendary_level = lvl + 1
         return result
     
     def load_recipe_data(self, recipe: Recipe) -> Recipe:
@@ -173,7 +191,12 @@ class WoWAPI:
         assert resp.status_code == 200
         resp_data = resp.json()
         if "crafted_item" not in resp_data:
-            return None
+            items = self.search_items(resp_data["name"])
+            assert len(items) <= 1
+            if not items:
+                return None
+            resp_data["crafted_quantity"] = {"value": 1}
+            resp_data["crafted_item"] = {"id": items[0]}
         q_data = resp_data["crafted_quantity"]
         quantity = q_data["value"] if "value" in q_data \
              else (q_data["maximum"] - q_data["minimum"]) / 2 + q_data["minimum"]
@@ -193,6 +216,19 @@ class WoWAPI:
         assert resp.status_code == 200
         resp_data = resp.json()
         return Item(item_id, resp_data["name"], resp_data["purchase_price"])
+    
+    def search_items(self, item_name: str) -> List[int]:
+        name_parts = item_name.split(" ")
+        params=[
+            ("orderby", "id"),
+            ("_page", "1")
+        ]
+        params.extend([(f"name.{self.conf['data.language']}", part) for part in name_parts])
+        url = self.__construct_url(f"/data/wow/search/item", Namespace.STATIC, params=params)
+        resp: req.Response = req.get(url)
+        assert resp.status_code == 200
+        resp_data = resp.json()
+        return [result["data"]["id"] for result in resp_data["results"]]
     
     def load_auctions(self, connected_realm_id: int) -> List[Auction]:
         url = self.__construct_url(f"/data/wow/connected-realm/{connected_realm_id}/auctions", Namespace.DYNAMIC)

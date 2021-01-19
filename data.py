@@ -36,11 +36,20 @@ def serialize_item_stack(s: ItemStack) -> Dict[str, Any]:
     return {"count": s.count, "item_id": s.item_id}
 
 def serialize_recipe(r: Recipe) -> Dict[str, Any]:
-    return {"id": r.id, "category": r.category, "name": r.name, "crafted_item": serialize_item_stack(r.crafted_item), 
-    "profession": {
-        "id": r.profession_id,
-        "tier": r.tier_id
-    }, "reagents": [serialize_item_stack(ri) for ri in r.reagents]}
+    result = {
+        "id": r.id,
+        "category": r.category,
+        "name": r.name,
+        "crafted_item": serialize_item_stack(r.crafted_item), 
+        "profession": {
+            "id": r.profession_id,
+            "tier": r.tier_id
+        },
+        "reagents": [serialize_item_stack(ri) for ri in r.reagents]
+    }
+    if r.legendary_level is not None:
+        result["legendary_level"] = r.legendary_level
+    return result
 
 def deserialize_item_stack(data: Dict[str, Any]) -> ItemStack:
     if data["count"] == 0:
@@ -51,7 +60,8 @@ def deserialize_recipe(data: Dict[str, Any]) -> Recipe:
     return Recipe(data["id"], data["category"], data["name"],
                  data["profession"]["id"], data["profession"]["tier"],
                   deserialize_item_stack(data["crafted_item"]),
-                  [deserialize_item_stack(ri) for ri in data["reagents"]])
+                  [deserialize_item_stack(ri) for ri in data["reagents"]],
+                  data.get("legendary_level", None))
 
 def serialize_item(i: Item) -> Dict[str, Any]:
     return {"id": i.id, "name": i.name, "vendor_price": i.vendor_price if i.vendor_price is not None else 0}
