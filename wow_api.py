@@ -3,6 +3,20 @@ from config import Config
 from pathlib import Path
 from typing import List, Tuple, Dict, Union, Iterable
 from urllib import parse
+from data_types import ConnectedRealm, \
+                       Realm, \
+                       Profession, \
+                       ProfessionTier, \
+                       Item, \
+                       ItemModifier, \
+                       PetInfo, \
+                       Auction, \
+                       AuctionHouseItem, \
+                       AuctionHousePetItem, \
+                       Recipe, \
+                       NormalRecipe, \
+                       ItemQuality, \
+                       ItemStack
 
 from enum import Enum
 from dataclasses import dataclass
@@ -15,78 +29,6 @@ class Namespace(Enum):
     STATIC="static"
     DYNAMIC="dynamic"
     PROFILE="profile"
-
-@dataclass
-class Realm:
-    id: int
-    name: str
-    slug: str
-
-@dataclass
-class ConnectedRealm:
-    id: int
-    realms: List[Realm]
-
-@dataclass
-class Item:
-    id: int
-    name: str
-    vendor_price: int
-
-@dataclass
-class ItemStack:
-    count: float
-    item_id: int
-
-@dataclass
-class Recipe:
-    id: int
-    category: str
-    name: str
-    profession_id: int
-    tier_id: int
-    crafted_item: ItemStack
-    reagents: List[ItemStack]
-    # shadowlands specifics
-    legendary_level: int = None
-
-@dataclass
-class ProfessionTier:
-    id: int
-    name: str
-
-@dataclass
-class Profession:
-    id: int
-    name: str
-    tiers: List[ProfessionTier]
-
-@dataclass
-class ItemModifier:
-    key: int
-    value: int
-
-@dataclass
-class PetInfo:
-    breed_id: int
-    level: int
-    quality_id: int
-    species_id: int
-
-@dataclass
-class AuctionHouseItem:
-    id: int
-    bonus_lists: List[int]
-    modifiers: List[ItemModifier]
-    pet_info: PetInfo
-
-@dataclass
-class Auction:
-    id: int
-    price: int
-    quantity: int
-    time_left: str
-    item: AuctionHouseItem
 
 class WoWAPI:
     def __init__(self, conf: Config):
@@ -143,15 +85,30 @@ class WoWAPI:
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
         resp_data = resp.json()
-        return [Profession(p["id"], p["name"], {}) for p in resp_data["professions"]]
+        return [Profession(p["id"], p["name"], []) for p in resp_data["professions"]]
+    
+    @staticmethod
+    def __get_profession_tier_expansions(tier_ids: List[int]) -> Dict[int, int]:
+        tier_ids = sorted(tier_ids)[::-1]
+        # this is really a mess:
+        # shadowlands made a huge jump, the rest is sorted descending
+        shadowlands_id = tier_ids[0]
+        result = {
+            tid: i+1 for i, tid in enumerate(tier_ids[1:])
+        }
+        result[shadowlands_id] = 9
+        return result
     
     def load_profession_tiers(self, profession_id) -> List[ProfessionTier]:
         url = self.__construct_url(f"/data/wow/profession/{profession_id}", Namespace.STATIC)
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
         resp_data = resp.json()
-        return [ProfessionTier(pt["id"], pt["name"]) for pt in resp_data["skill_tiers"]] \
-            if "skill_tiers" in resp_data else []
+        if "skill_tiers" not in resp_data:
+            return []
+        tier_expansions = self.__get_profession_tier_expansions([tier_data["id"] for tier_data in resp_data["skill_tiers"]])
+        return [ProfessionTier(id=tier_data["id"], name=tier_data["name"], expansion=tier_expansions[tier_data["id"]]) 
+                for tier_data in resp_data["skill_tiers"]]
 
     def load_professions(self) -> List[Profession]:
         profs = self.load_profession_list()
@@ -159,7 +116,9 @@ class WoWAPI:
             prof.tiers = self.load_profession_tiers(prof.id)
         return profs
     
-    def load_recipe_list(self, profession_id: int, tier_id: int) -> List[Recipe]:
+    def load_recipe_list(self, profession: Profession, tier: ProfessionTier) -> List[Recipe]:
+        profession_id = profession.id
+        tier_id = tier.id
         url = self.__construct_url(f"/data/wow/profession/{profession_id}/skill-tier/{tier_id}", Namespace.STATIC)
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
@@ -168,21 +127,11 @@ class WoWAPI:
             return []
         result: List[Recipe] = []
         for cat in resp_data["categories"]:
-            # Shadowlands specifics
-            by_name: Dict[str, List[Recipe]] = {}
             cat_name = cat["name"]
-            # non shadowlands:
-            # result.extend([Recipe(r["id"], cat_name, r["name"], profession_id, tier_id, None, []) for r in cat["recipes"]])
-            # Shadowlands: detect legendaries
-            for recipe_data in cat["recipes"]:
-                recipe = Recipe(recipe_data["id"], cat_name, recipe_data["name"], profession_id, tier_id, None, [])
-                recipe_list = by_name.get(recipe.name, [])
-                recipe_list.append(recipe)
-                by_name[recipe.name] = recipe_list
-                result.append(recipe)
-            for legendaries in [lst for lst in by_name.values() if len(lst) > 1]:
-                for lvl, legendary in enumerate(sorted(legendaries, key=lambda r: r.id)):
-                    legendary.legendary_level = lvl + 1
+            result.extend([NormalRecipe(id=r["id"], category=cat_name, name=r["name"],
+                                        profession_id=profession_id, tier_id=tier_id,
+                                        expansion=tier.expansion, crafted_item=None,
+                                        reagents=[]) for r in cat["recipes"]],)
         return result
     
     def load_recipe_data(self, recipe: Recipe) -> Recipe:
@@ -195,7 +144,8 @@ class WoWAPI:
             assert len(items) <= 1
             if not items:
                 return None
-            resp_data["crafted_quantity"] = {"value": 1}
+            if "crafted_quantity" not in resp_data:
+                resp_data["crafted_quantity"] = {"value": 1}
             resp_data["crafted_item"] = {"id": items[0]}
         q_data = resp_data["crafted_quantity"]
         quantity = q_data["value"] if "value" in q_data \
@@ -204,21 +154,23 @@ class WoWAPI:
         recipe.reagents = [ItemStack(rg["quantity"], rg["reagent"]["id"]) for rg in resp_data["reagents"]]
         return recipe
     
-    def load_recipes(self, profession_id: int, tier_id: int) -> List[Recipe]:
-        result = self.load_recipe_list(profession_id, tier_id)
+    def load_recipes(self, profession: Profession, tier: ProfessionTier) -> List[Recipe]:
+        result = self.load_recipe_list(profession, tier)
         for r in result:
             self.load_recipe_data(r)
         return result
     
-    def load_item(self, item_id: int) -> Item:
+    def load_item(self, item_id: int, expansion: int) -> Item:
         url = self.__construct_url(f"/data/wow/item/{item_id}", Namespace.STATIC)
         resp: req.Response = req.get(url)
         assert resp.status_code == 200
         resp_data = resp.json()
-        return Item(item_id, resp_data["name"], resp_data["purchase_price"])
+        return Item(id=item_id, name=resp_data["name"], vendor_price=resp_data["purchase_price"],
+                    quality=ItemQuality(resp_data["quality"]["type"]), item_class=resp_data["item_class"]["id"],
+                    item_subclass=resp_data["item_subclass"]["id"], expansion=expansion)
     
     def search_items(self, item_name: str) -> List[int]:
-        name_parts = item_name.split(" ")
+        name_parts = [part for part in item_name.split(" ") if len(part) > 3]
         params=[
             ("orderby", "id"),
             ("_page", "1")
@@ -245,7 +197,7 @@ class WoWAPI:
             pet_info = PetInfo(item_data["pet_breed_id"], item_data["pet_level"], 
                                item_data["pet_quality_id"], item_data["pet_species_id"]) if "pet_level" in item_data \
                         else None
-            item = AuctionHouseItem(item_data["id"], bonus_lists, modifiers, pet_info)
+            item = AuctionHouseItem.create(item_data["id"], bonus_lists, modifiers, pet_info)
             quantity = auction_data["quantity"]
             price = auction_data["buyout"] / quantity if "buyout" in auction_data \
                else auction_data["unit_price"]

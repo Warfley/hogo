@@ -1,81 +1,50 @@
 from config import Config
 from wow_api import WoWAPI, AuctionHouseItem, ItemModifier, PetInfo, Auction, Item, Recipe, ItemStack
+from data_types import ConnectedRealm, \
+                       Realm, \
+                       Profession, \
+                       ProfessionTier, \
+                       Item, \
+                       ItemModifier, \
+                       PetInfo, \
+                       Auction, \
+                       AuctionHouseItem, \
+                       AuctionHousePetItem, \
+                       CombinedAuction, \
+                       Recipe, \
+                       LegendaryRecipe, \
+                       NormalRecipe, \
+                       DisenchantRecipe, \
+                       ItemStack
 from argparse import ArgumentParser
 from data import DataService
 from pathlib import Path
 from typing import List, Dict, Any, Set, Tuple
 import yaml
 
-def serialize_modifier(modifier: ItemModifier) -> Dict[str, Any]:
-    return {"type": modifier.key, "value": modifier.value}
-
-def serialize_pet_info(pet_info: PetInfo) -> Dict[str, Any]:
-    return {"breed": pet_info.breed_id, "level": pet_info.level, "quality": pet_info.quality_id, "species": pet_info.species_id}
-
-def serialize_item(item: AuctionHouseItem) -> Dict[str, Any]:
-    data = {"id": item.id,
-            "modifiers": [serialize_modifier(m) for m in item.modifiers],
-            "bonus_lists": [bl for bl in item.bonus_lists]
-           }
-    if item.pet_info is not None:
-        data["pet_info"] = serialize_pet_info(item.pet_info)
-    return data
-
-def deserialize_modifier(data: Dict[str, Any]) -> ItemModifier:
-    return ItemModifier(data["type"], data["value"])
-
-def deserialize_pet_info(data: Dict[str, Any]) -> PetInfo:
-    return PetInfo(data["breed"], data["level"], data["quality"], data["species"])
-
-def deserialize_item(data: Dict[str, Any]) -> AuctionHouseItem:
-    modifiers = [deserialize_modifier(md) for md in data["modifiers"]]
-    pet_info = deserialize_pet_info(data["pet_info"]) if "pet_info" in data \
-          else None
-    return AuctionHouseItem(data["id"], data["bonus_lists"], modifiers, pet_info)
-
-class AuctionInfo:
-    @staticmethod
-    def generate_id(price: int, item: AuctionHouseItem) -> str:
-        return f"Price={price}; item={str(item)})"
-
-    def __init__(self, auction: Auction=None, data: Dict[str, Any]=None):
-        assert (auction is not None) != (data is not None)
-        if auction is not None:
-            self.price = auction.price
-            self.item = auction.item
-            self.quantity = auction.quantity
-        else:
-            self.price = data["price"]
-            self.quantity = data["quantity"]
-            self.item = deserialize_item(data["item"])
-        self.id = self.generate_id(self.price, self.item)
-    
-    def serialize(self) -> Dict[str, Any]:
-        return {"price": self.price, "quantity": self.quantity, "item": serialize_item(self.item)}
-    
-
+from logging import info, warning
 
 class AuctionHouse:
     def __init__(self, config: Config, data_dir: Path = Path("auctions")):
         self.config = config
         self.data_file = data_dir/f"{config['server.region']}.{config['server.realm']}.yml"
-        self.__auctions: Dict[int, List[AuctionInfo]] = {}
+        self.__auctions: Dict[int, List[CombinedAuction]] = {}
         data_dir.mkdir(parents=True, exist_ok=True)
         self.api = WoWAPI(config)
     
-    def get_auctions(self) -> Dict[int, List[AuctionInfo]]:
+    def get_auctions(self) -> Dict[int, List[CombinedAuction]]:
         if self.__auctions == {}:
             self.__auctions = self.__load_data()
         return self.__auctions
     
-    def __load_data(self) -> Dict[int, List[AuctionInfo]]:
+    def __load_data(self) -> Dict[int, List[CombinedAuction]]:
         if not self.data_file.exists():
             return {}
         with open(self.data_file, "r") as fl:
             raw_data = yaml.load(fl, Loader=yaml.FullLoader)
             result = {}
             for ad in raw_data:
-                auction = AuctionInfo(data=ad)
+                auction = CombinedAuction(data=ad)
                 al = result.get(auction.item.id, [])
                 al.append(auction)
                 result[auction.item.id] = al
@@ -90,17 +59,17 @@ class AuctionHouse:
     
     def update(self, connected_realm_id: int, filter_items: Set[int]=set()) -> None:
         self.api.generate_token()
-        cache: Dict[str, AuctionInfo] = {}
+        cache: Dict[str, CombinedAuction] = {}
         auctions = self.api.load_auctions(connected_realm_id)
         self.__auctions = {}
         for a in auctions:
             if len(filter_items) > 0 and a.item.id not in filter_items:
                 continue
-            aid = AuctionInfo.generate_id(a.price, a.item)
+            aid = CombinedAuction.generate_id(a.price, a.item)
             if aid in cache:
                 cache[aid].quantity += a.quantity
             else:
-                ai = AuctionInfo(auction=a)
+                ai = CombinedAuction(auction=a)
                 cache[aid] = ai
                 al = self.__auctions.get(a.item.id, [])
                 al.append(ai)
@@ -146,7 +115,7 @@ class AuctionHouse:
             for a in auctions:
                 lvl = KEY_LEVELS.get(a.item.bonus_lists[-1])
                 if lvl is None:
-                    print(f"Unknown key level: {a.item.bonus_lists[-1]} for item {item}... Ignoring")
+                    warning(f"Unknown key level: {a.item.bonus_lists[-1]} for item {item}... Ignoring")
                     continue
                 item_result[lvl] = min(item_result.get(lvl, 9999999999999), a.price)
             result[item] = item_result
@@ -181,14 +150,14 @@ def handle_auction_command(args, config: Config) -> int:
     ah = AuctionHouse(config)
     data = DataService(config)
     if args.subcommand == "update":
-        print("Updating auction list...", end=" ", flush=True)
+        info("Updating auction list...")
         ah.update(__get_connected_realm_id(config), __get_item_filter(config, data))
-        print("done")
+        info("Auctionlist successfully updated")
         return 0
     if args.update:
-        print("Updating auction list...", end=" ", flush=True)
+        info("Updating auction list...")
         ah.update(__get_connected_realm_id(config), __get_item_filter(config, data))
-        print("done")
+        info("Auctionlist successfully updated")
     
     if args.subcommand == "search":
         item_cache: Dict[int, Item] = {}
@@ -205,14 +174,14 @@ def price_to_string(price: int) -> str:
     bronze = price % 100
     result = ""
     if gold:
-        result = f"{gold}g"
+        result = f"{gold}g, "
     if silver:
-        result = f"{result}, {silver}s"
+        result = f"{result}{silver}s, "
     if bronze:
-        result = f"{result}, {bronze}b"
-    return result.strip()
+        result = f"{result}{bronze}b, "
+    return result[:-2]
 
-def print_auction(auction: AuctionInfo, cache: Dict[int, Item]) -> None:
+def print_auction(auction: CombinedAuction, cache: Dict[int, Item]) -> None:
     item_name = cache[auction.item.id].name
     print(f"{item_name} ({auction.quantity}): {price_to_string(auction.price)}")
 
@@ -222,17 +191,18 @@ def __build_item_cache(data: DataService) -> Dict[int, Item]:
 def __build_recipe_cache(recipes: List[Recipe]) -> Tuple[Dict[int,  Recipe], Set[int], Dict[int, Dict[int, Recipe]]]:
     crafted_items: Dict[int, Recipe] = {}
     all_items: Set[int] = set()
-    # shadowlands specific
     legendary_items: Dict[int, Dict[int, Recipe]] = {}
     for recipe in recipes:
-        if recipe.crafted_item is None:
+        if isinstance(recipe, DisenchantRecipe):
             continue
-        if recipe.legendary_level is not None:
-            legendary_item = legendary_items.get(recipe.crafted_item.item_id, {})
-            legendary_item[recipe.legendary_level] = recipe
-            legendary_items[recipe.crafted_item.item_id] = legendary_item
-        crafted_items[recipe.crafted_item.item_id] = recipe
-        all_items.add(recipe.crafted_item.item_id)
+        if isinstance(recipe, LegendaryRecipe):
+            legendary_item = legendary_items.get(recipe.item_id, {})
+            legendary_item[recipe.rank] = recipe
+            legendary_items[recipe.item_id] = legendary_item
+        crafted_item = recipe.item_id if isinstance(recipe, LegendaryRecipe) \
+                       else recipe.crafted_item.item_id
+        crafted_items[crafted_item] = recipe
+        all_items.add(crafted_item)
         for reagent in recipe.reagents:
             all_items.add(reagent.item_id)
     return crafted_items, all_items, legendary_items
@@ -275,12 +245,13 @@ def __compute_recipe_costs(recipe: Recipe, min_prices: Dict[int, Tuple[int, int]
     for reagent in recipe.reagents:
         # if we can't buy it, skrew it
         if reagent.item_id not in min_prices:
-            print("Reagent: " + item_cache[reagent.item_id].name + " is not obtainable... Skipping computation for: " + item_cache[recipe.crafted_item.item_id].name)
+            warning("Reagent: " + item_cache[reagent.item_id].name + " is not obtainable... Skipping computation for: " + item_cache[recipe.crafted_item.item_id].name)
             return None
         # if we can buy/craft it, add it's cost to the total
         result += min_prices[reagent.item_id][0] * reagent.count
+    quantity = 1 if isinstance(recipe, LegendaryRecipe) else recipe.crafted_item.count
     # compute price per item not per stack
-    return round(result / recipe.crafted_item.count)
+    return round(result / quantity)
 
 
 def __compute_production_costs(crafted_items: Dict[int, Recipe], item_cache: Dict[int, Item],
@@ -333,7 +304,8 @@ def __compute_production_costs(crafted_items: Dict[int, Recipe], item_cache: Dic
     return result, legendary_result
 
 def __print_item(recipe: Recipe, production_cost: int, ah_price: int, min_prices: Dict[int, Tuple[int, int]], item_names: Dict[int, str]) -> None:
-    item_name = item_names[recipe.crafted_item.item_id]
+    item_id = recipe.item_id if isinstance(recipe, LegendaryRecipe) else recipe.crafted_item.item_id
+    item_name = item_names[item_id]
     profit = round(ah_price * 0.95) - production_cost
     print(f"{item_name}: Price={price_to_string(ah_price)} Costs={price_to_string(production_cost)} Profit={price_to_string(profit)}")
     for reagent in recipe.reagents:
@@ -345,19 +317,17 @@ def __print_item(recipe: Recipe, production_cost: int, ah_price: int, min_prices
 
 
 def handle_profit(args, config: Config, data: DataService, ah: AuctionHouse) -> int:
-    print("Loading recipes...", end=" ", flush=True)
+    info("Loading recipes...")
     professions: Set[Tuple[int, int]] = __get_professions(args.professions, config, data)
     recipes: List[Recipe] = data.profession_recipes(professions)
-    print("done")
-    print("Indexing items...", end=" ", flush=True)
+    info("Indexing items...")
     item_cache: Dict[int, Item] = __build_item_cache(data)
     crafted_items, all_items, legendary_items = __build_recipe_cache(recipes)
     vendor_items = __items_from_list_and_conf(args.vendor_items, "data.vendor_items", config, data)
     ignore_items = __items_from_list_and_conf(args.ignore, "auctions.ignore", config, data)
     buy_items = __items_from_list_and_conf(args.buy, "auctions.buy", config, data)
     specific_items = __items_from_list_and_conf(args.specific, "auctions.specific", config, data)
-    print("done")
-    print("Computing item prices...", end=" ", flush=True)
+    info("Computing item prices...")
     ah_prices: Dict[int, int] = ah.compute_prices(all_items)
     legendary_prices: Dict[int, Dict[int, int]] = ah.compute_legendary_prices(set(legendary_items.keys()))
     # The second int indicates how the item is obtained, AH(0), Vendor(1), crafted(2)
@@ -368,13 +338,12 @@ def handle_profit(args, config: Config, data: DataService, ah: AuctionHouse) -> 
         min_prices[iid] = (item.vendor_price, 1) if iid in vendor_items and \
                                                     item.vendor_price < ah_price \
                                                  else (ah_price, 0)
-    print("done")
-    print("Computing production costs...", end=" ", flush=True)
+    info("Computing production costs...")
     production_costs, legendary_production_costs = __compute_production_costs(crafted_items, item_cache,
                                                                               legendary_items,
                                                                               buy_items, ignore_items,
                                                                               specific_items, min_prices)
-    print("done")
+    info("Price computation complete")
     # Printing
     LEGENDARY_ILVL = {
         1: 190,
@@ -384,11 +353,15 @@ def handle_profit(args, config: Config, data: DataService, ah: AuctionHouse) -> 
     }
     item_names = {iid: item_cache[iid].name for iid in all_items}
     for item, costs in production_costs.items():
+        if item not in ah_prices:
+            continue
         recipe = crafted_items[item]
-        __print_item(recipe, costs, ah_prices.get(item, 0), min_prices, item_names)
-    print("Legendaries:")
+        __print_item(recipe, costs, ah_prices[item], min_prices, item_names)
+    if legendary_production_costs: print("Legendaries:")
     for item, legendary_costs in legendary_production_costs.items():
         for lvl, costs in legendary_costs.items():
+            if lvl not in legendary_prices[item]:
+                continue
             item_names[item] = f"{item_cache[item].name} ({LEGENDARY_ILVL[lvl]})"
             recipe = legendary_items[item][lvl]
-            __print_item(recipe, costs, legendary_prices[item].get(lvl, 0), min_prices, item_names)
+            __print_item(recipe, costs, legendary_prices[item][lvl], min_prices, item_names)

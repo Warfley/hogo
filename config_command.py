@@ -3,6 +3,8 @@ from data import DataService
 from argparse import ArgumentParser
 from typing import List
 
+from logging import info, warning, error
+
 def add_default_config_args(parser: ArgumentParser) -> None:
     parser.add_argument("--language", "-l", type=str, help="Language of the item names")
     parser.add_argument("--region", "-r", type=str, help="Region of the realm")
@@ -56,7 +58,7 @@ def handle_config_command(args, config: Config) -> int:
     elif args.subcommand == "get":
         val = config[args.prop]
         if val is None:
-            print(f"No value stored for {args.prop}")
+            error(f"No value stored for {args.prop}")
             return 1
         else:
             print(val)
@@ -100,10 +102,11 @@ def handle_config_command(args, config: Config) -> int:
         return 1
     if new_config is not None:
         new_config.store()
-    return 1
+    return 0
 
 def __init_config(args) -> Config:
     result = Config()
+    result.fill_defaults()
     result.update_from_args(args)
     if "server.region" not in result:
         while True:
@@ -129,6 +132,15 @@ def __init_config(args) -> Config:
         result["client.id"] = input("API client ID: ")
     if "client.pass" not in result:
         result["client.pass"] = input("API client secret: ")
+    if "data.expansions.current" not in result:
+        while True:
+            expansion = input("Current expansion number (default: 9)")
+            expansion = "9" if not expansion else expansion
+            if expansion.isnumeric() and int(expansion) > 0:
+                result["data.expansions.current"] = int(expansion)
+                break
+            else:
+                print("Invalid expansion number, try again")
     return result
 
 def __add_professions(professions: List[str], config: Config) -> Config:
@@ -139,7 +151,7 @@ def __add_professions(professions: List[str], config: Config) -> Config:
     for prof in professions:
         pid, tid = data.find_profession_tier(prof)
         if pid is None:
-            print(f"Can't find profession {prof}... skipping")
+            warning(f"Can't find profession {prof}... skipping")
             continue
         prev.add(f"{pid}-{tid}")
     result["data.professions"] = list(prev)
@@ -153,7 +165,7 @@ def __delete_professions(professions: List[str], config: Config) -> Config:
     for prof in professions:
         pid, tid = data.find_profession_tier(prof)
         if pid is None:
-            print(f"Can't find profession {prof}... skipping")
+            warning(f"Can't find profession {prof}... skipping")
             continue
         prev.remove(f"{pid}-{tid}")
     result["data.professions"] = list(prev)
@@ -167,7 +179,7 @@ def __add_vendor_items(items: List[str], config: Config) -> Config:
     for item in items:
         iid = data.find_item(item)
         if iid is None:
-            print(f"Can't find item {item}... skipping")
+            warning(f"Can't find item {item}... skipping")
             continue
         prev.add(iid)
     result["data.vendor_items"] = list(prev)
@@ -181,7 +193,7 @@ def __delete_vendor_items(items: List[str], config: Config) -> Config:
     for item in items:
         iid = data.find_item(item)
         if iid is None:
-            print(f"Can't find item {item}... skipping")
+            warning(f"Can't find item {item}... skipping")
             continue
         prev.remove(iid)
     result["data.vendor_items"] = list(prev)
@@ -195,7 +207,7 @@ def __add_auction_items(items: List[str], config: Config, command: str) -> Confi
     for item in items:
         iid = data.find_item(item)
         if iid is None:
-            print(f"Can't find item {item}... skipping")
+            warning(f"Can't find item {item}... skipping")
             continue
         prev.add(iid)
     result[f"auctions.{command}"] = list(prev)
@@ -209,7 +221,7 @@ def __delete_auction_items(items: List[str], config: Config, command: str) -> Co
     for item in items:
         iid = data.find_item(item)
         if iid is None:
-            print(f"Can't find item {item}... skipping")
+            warning(f"Can't find item {item}... skipping")
             continue
         prev.remove(iid)
     result[f"auctions.{command}"] = list(prev)

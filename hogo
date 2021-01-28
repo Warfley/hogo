@@ -8,6 +8,8 @@ from data import init_update_parser, handle_update_command
 from auctions import init_auction_parser, handle_auction_command
 from pathlib import Path
 
+import logging
+
 def main():
     parser = ArgumentParser()
     add_default_config_args(parser)
@@ -22,8 +24,9 @@ def main():
     auctions_parser = parsers.add_parser("auctions", help="Compute AH information")
     init_auction_parser(auctions_parser)
 
-
     args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     config = Config()
     config.load()

@@ -1,73 +1,22 @@
 from config import Config
 from argparse import ArgumentParser
 from pathlib import Path
-from wow_api import WoWAPI, ConnectedRealm, Realm, Profession, ProfessionTier, ItemStack, Recipe, Item
+from wow_api import WoWAPI
+from data_types import ConnectedRealm, \
+                       Realm, \
+                       Profession, \
+                       ProfessionTier, \
+                       Item, \
+                       Recipe, \
+                       NormalRecipe, \
+                       LegendaryRecipe, \
+                       DisenchantRecipe, \
+                       ItemQuality, \
+                       ItemStack
 import yaml
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Tuple
 
-def serialize_realm(r: Realm) -> Dict[str, Any]:
-    return {"id": r.id, "name": r.name, "slug": r.slug}
-
-def serialize_connected_realm(cr: ConnectedRealm) -> Dict[str, Any]:
-    return {"id": cr.id, "realms": [serialize_realm(r) for r in cr.realms]}
-
-def deserialize_realm(data: Dict[str, Any]) -> Realm:
-    return Realm(data["id"], data["name"], data["slug"])
-
-def deserialize_connected_realm(data: Dict[str, Any]) -> ConnectedRealm:
-    return ConnectedRealm(data["id"], [deserialize_realm(r) for r in data["realms"]])
-
-def serialize_profession_tier(pt: ProfessionTier) -> Dict[str, Any]:
-    return {"id": pt.id, "name": pt.name}
-
-def serialize_profession(p: Profession) -> Dict[str, Any]:
-    return {"id": p.id, "name": p.name, "tiers": [serialize_profession_tier(pt) for pt in p.tiers]}
-
-def deserialize_profession_tier(data: Dict[str, Any]) -> ProfessionTier:
-    # Recipes are stored seperately
-    return ProfessionTier(data["id"], data["name"])
-
-def deserialize_profession(data: Dict[str, Any]) -> Profession:
-    return Profession(data["id"], data["name"], [deserialize_profession_tier(td) for td in data["tiers"]])
-
-def serialize_item_stack(s: ItemStack) -> Dict[str, Any]:
-    if s is None:
-        return {"count": 0, "item_id": 0}
-    return {"count": s.count, "item_id": s.item_id}
-
-def serialize_recipe(r: Recipe) -> Dict[str, Any]:
-    result = {
-        "id": r.id,
-        "category": r.category,
-        "name": r.name,
-        "crafted_item": serialize_item_stack(r.crafted_item), 
-        "profession": {
-            "id": r.profession_id,
-            "tier": r.tier_id
-        },
-        "reagents": [serialize_item_stack(ri) for ri in r.reagents]
-    }
-    if r.legendary_level is not None:
-        result["legendary_level"] = r.legendary_level
-    return result
-
-def deserialize_item_stack(data: Dict[str, Any]) -> ItemStack:
-    if data["count"] == 0:
-        return None
-    return ItemStack(data["count"], data["item_id"])
-
-def deserialize_recipe(data: Dict[str, Any]) -> Recipe:
-    return Recipe(data["id"], data["category"], data["name"],
-                 data["profession"]["id"], data["profession"]["tier"],
-                  deserialize_item_stack(data["crafted_item"]),
-                  [deserialize_item_stack(ri) for ri in data["reagents"]],
-                  data.get("legendary_level", None))
-
-def serialize_item(i: Item) -> Dict[str, Any]:
-    return {"id": i.id, "name": i.name, "vendor_price": i.vendor_price if i.vendor_price is not None else 0}
-
-def deserialize_item(data: Dict[str, Any]) -> Item:
-    return Item(data["id"], data["name"], None if data["vendor_price"] == 0 else data["vendor_price"])
+from logging import info, warning
 
 class DataService:
     def __init__(self, config: Config, data_dir: Path = Path("data")):
@@ -106,12 +55,12 @@ class DataService:
             return []
         with open(realm_file, "r") as fl:
             raw_data = yaml.load(fl, Loader=yaml.FullLoader)
-            return [deserialize_connected_realm(crd) for crd in raw_data]
+            return [ConnectedRealm.deserialize(crd) for crd in raw_data]
     
     def __store_realms(self) -> None:
         realm_file = self.data_dir/"realms.yml"
         with open(realm_file, "w") as fl:
-            raw_data = [serialize_connected_realm(r) for r in self.__realms]
+            raw_data = [r.serialize() for r in self.__realms]
             yaml.dump(raw_data, fl)
     
     def __load_professions(self) -> List[Profession]:
@@ -120,12 +69,12 @@ class DataService:
             return []
         with open(profession_file, "r") as fl:
             raw_data = yaml.load(fl, Loader=yaml.FullLoader)
-            return [deserialize_profession(pd) for pd in raw_data]
+            return [Profession.deserialize(pd) for pd in raw_data]
     
     def __store_professions(self) -> None:
         profession_file = self.data_dir/"professions.yml"
         with open(profession_file, "w") as fl:
-            raw_data = [serialize_profession(p) for p in self.__professions]
+            raw_data = [p.serialize() for p in self.__professions]
             yaml.dump(raw_data, fl)
     
     def __load_recipes(self) -> List[Recipe]:
@@ -134,12 +83,12 @@ class DataService:
             return []
         with open(recipe_file, "r") as fl:
             raw_data = yaml.load(fl, Loader=yaml.FullLoader)
-            return [deserialize_recipe(rd) for rd in raw_data]
+            return [Recipe.deserialize(rd) for rd in raw_data]
     
     def __store_recipes(self) -> None:
         recipe_file = self.data_dir/"recipes.yml"
         with open(recipe_file, "w") as fl:
-            raw_data = [serialize_recipe(r) for r in self.__recipes]
+            raw_data = [r.serialize() for r in self.__recipes]
             yaml.dump(raw_data, fl)
 
     def __load_items(self) -> List[Item]:
@@ -148,12 +97,12 @@ class DataService:
             return []
         with open(item_file, "r") as fl:
             raw_data = yaml.load(fl, Loader=yaml.FullLoader)
-            return [deserialize_item(i) for i in raw_data]
+            return [Item.deserialize(i) for i in raw_data]
     
     def __store_items(self) -> None:
         item_file = self.data_dir/"items.yml"
         with open(item_file, "w") as fl:
-            raw_data = [serialize_item(i) for i in self.__items]
+            raw_data = [i.serialize() for i in self.__items]
             yaml.dump(raw_data, fl)
 
     def update_realms(self) -> None:
@@ -166,18 +115,59 @@ class DataService:
         self.__professions = self.api.load_professions()
         self.__store_professions()
     
-    def update_recipes(self, profession_tiers: List[Tuple[int, int]]) -> None:
+    @staticmethod
+    def __normal_recipe_to_legendary(recipe: NormalRecipe, rank: int) -> LegendaryRecipe:
+        return LegendaryRecipe(id=recipe.id,
+                               category=recipe.category,
+                               name=f"{recipe.name} (Rank {rank})",
+                               profession_id=recipe.profession_id,
+                               tier_id=recipe.tier_id,
+                               expansion=recipe.expansion,
+                               item_id=recipe.crafted_item.item_id,
+                               reagents=recipe.reagents,
+                               rank=rank)
+
+    # shadowlands specific code
+    @staticmethod
+    def __make_legendary_recipes(recipes: List[NormalRecipe]) -> List[Recipe]:
+        by_item: Dict[int, List[NormalRecipe]] = {}
+        for recipe in recipes:
+            r_list = by_item.get(recipe.crafted_item.item_id, [])
+            r_list.append(recipe)
+            by_item[recipe.crafted_item.item_id] = r_list
+        result: List[Recipe] = []
+        for same_item_recipes in by_item.values():
+            if len(same_item_recipes) == 1:
+                result.extend(same_item_recipes)
+                continue
+            # this is a legendary recipe the ids are ascending with the rank
+            legendary_recipes = [DataService.__normal_recipe_to_legendary(recipe, i + 1) \
+                                 for i, recipe in enumerate(sorted(same_item_recipes, key=lambda r: r.id))]
+            result.extend(legendary_recipes)
+        return result
+
+    def update_recipes(self, profession_tiers: List[Tuple[Profession, ProfessionTier]]) -> None:
         self.api.generate_token()
         self.__recipes = []
+        sl_exp = self.config["data.expansions.shadowlands"]
+        legendary_professions = {
+            self.config["data.profession_ids.blacksmithing"],
+            self.config["data.profession_ids.tailoring"],
+            self.config["data.profession_ids.leatherworking"],
+            self.config["data.profession_ids.jewelcrafting"],
+        }
         for prof, tier in profession_tiers:
             recipes = self.api.load_recipes(prof, tier)
+            # add legendary information for shadowlands recipes
+            if tier.expansion == sl_exp and prof.id in legendary_professions:
+                recipes = self.__make_legendary_recipes(recipes)
             self.__recipes.extend(recipes)
         self.__store_recipes()
     
-    def __update_item(self, item_id: int, cache: Set[int]) -> None:
+    def __update_item(self, item_id: int, cache: Set[int], expansion: int) -> None:
         if item_id in cache:
             return
-        self.__items.append(self.api.load_item(item_id))
+        self.__items.append(self.api.load_item(item_id, expansion))
         cache.add(item_id)
 
     def update_items(self) -> None:
@@ -185,11 +175,69 @@ class DataService:
         self.__items = []
         cache = set()
         for recipe in self.get_recipes():
-            if recipe.crafted_item is not None:
-                self.__update_item(recipe.crafted_item.item_id, cache)
+            crafted_item = recipe.item_id if isinstance(recipe, LegendaryRecipe) \
+                           else recipe.crafted_item.item_id if isinstance(recipe, NormalRecipe) \
+                           else None
+            if crafted_item is not None:
+                self.__update_item(crafted_item, cache, recipe.expansion)
             for reagent in recipe.reagents:
-                self.__update_item(reagent.item_id, cache)
+                self.__update_item(reagent.item_id, cache, recipe.expansion)
         self.__store_items()
+    
+    def __get_enchantment_mats_by_expansion(self, expansions: Set[int], item_cache: Dict[int, Item]) -> Dict[int, Dict[ItemQuality, int]]:
+        enchant_mat_class = self.config["data.item_classes.crafting_material.id"]
+        enchantment_mat_subclass = self.config["data.item_classes.crafting_material.subclasses.enchantment"]
+        enchantment_id = self.config["data.profession_ids.enchanting"]
+        enchantment_prof, _ = self.prof_tiers_by_id(enchantment_id, None)
+        prof_tiers = {(enchantment_id, tier.id) for tier in enchantment_prof.tiers if tier.expansion in expansions}
+        tier_expansions = {tier.id: tier.expansion for tier in enchantment_prof.tiers if tier.expansion in expansions}
+
+        recipes = self.profession_recipes(prof_tiers)
+
+        result: Dict[int, Dict[ItemQuality, int]] = {exp: {} for exp in expansions}
+
+        # iterate of all recipes and search for the mats
+        for recipe in recipes:
+            if not isinstance(recipe, NormalRecipe):
+                continue
+            recipe_exp = tier_expansions[recipe.tier_id]
+            for reagent in recipe.reagents:
+                reagent_item = item_cache[reagent.item_id]
+                if reagent_item.item_class == enchant_mat_class and reagent_item.item_subclass == enchantment_mat_subclass:
+                    result[recipe_exp][reagent_item.quality] = reagent_item.id
+        return result
+    
+    def create_disenchantment_recipes(self, expansions: Set[int]) -> List[DisenchantRecipe]:
+        enchantment_id = self.config["data.profession_ids.enchanting"]
+        enchantment_prof, _ = self.prof_tiers_by_id(enchantment_id, None)
+        expansion_tiers = {tier.expansion: tier for tier in enchantment_prof.tiers}
+        probability_tables = self.config["data.disenchantment"]
+        quality_ids = {
+            ItemQuality.COMMON: 1,
+            ItemQuality.UNCOMMON: 2,
+            ItemQuality.RARE: 3,
+            ItemQuality.EPIC: 4
+        }
+        item_cache: Dict[int, Item] = {item.id: item for item in self.get_items()}
+        enchantment_mats = self.__get_enchantment_mats_by_expansion(expansions, item_cache)
+        recipes: List[DisenchantRecipe] = []
+        for expansion, mats in enchantment_mats.items():
+            for quality in mats.keys():
+                tier = expansion_tiers[expansion]
+                recipe_id = -(expansion * 10 + quality_ids[quality])
+                recipe_name = f"{tier.name}: Disenchanting {quality.value}"
+                probabilities: Dict[ItemQuality, float] = {ItemQuality(quality): prob for quality, prob in probability_tables[quality.value].items()}
+                crafted_items = []
+                for item_quality, item_prob in probabilities.items():
+                    if item_quality in mats:
+                        crafted_items.append(ItemStack(item_prob, mats[item_quality]))
+                recipe = DisenchantRecipe(id=recipe_id, category="disenchant", name=recipe_name,
+                                          profession_id=enchantment_id, tier_id=tier.id,
+                                          expansion=expansion, reagent_quality=quality,
+                                          crafted_items=crafted_items)
+                recipes.append(recipe)
+        self.__recipes.extend(recipes)
+        self.__store_recipes()
 
     def clear_realms(self) -> None:
         self.__realms = []
@@ -211,26 +259,44 @@ class DataService:
         item_file = self.data_dir/"items.yml"
         item_file.unlink()
     
-    def latest_professions(self) -> List[Tuple[int, int]]:
+    def professions_by_expansion(self, expansion: int) -> List[Tuple[Profession, ProfessionTier]]:
         result = []
         for prof in self.get_professions():
             if len(prof.tiers) > 0:
-                tier: ProfessionTier = sorted(prof.tiers, key=lambda t: t.id)[-1]
-                result.append((prof.id, tier.id))
+                tier: ProfessionTier = [tier for tier in prof.tiers if tier.expansion == expansion][0]
+                result.append((prof, tier))
         return result
+
+
+    def latest_professions(self) -> List[Tuple[Profession, ProfessionTier]]:
+        current_expansion = self.config["data.expansions.current"]
+        return self.professions_by_expansion(current_expansion)
     
-    def all_professions(self) -> List[Tuple[int, int]]:
+    def all_professions(self) -> List[Tuple[Profession, ProfessionTier]]:
         result = []
         for prof in self.get_professions():
-            result.extend([(prof.id, tier.id) for tier in prof.tiers])
+            result.extend([(prof, tier) for tier in prof.tiers])
         return result
     
-    def config_professions(self) -> List[Tuple[int, int]]:
+    def prof_tiers_by_id(self, prof_id: int, tier_id: int) -> Tuple[Profession, ProfessionTier]:
+        for prof in self.get_professions():
+            if prof.id == prof_id:
+                if tier_id is None:
+                    return prof, None
+                for tier in prof.tiers:
+                    if tier.id == tier_id:
+                        return prof, tier
+                return prof, None
+        return None, None
+    
+    def config_professions(self) -> List[Tuple[Profession, ProfessionTier]]:
         result = []
         for prof_tier in self.config.get_or_default("data.professions", []):
             pt = prof_tier.split("-")
-            prof = int(pt[0])
-            tier = int(pt[1])
+            prof_id = int(pt[0])
+            tier_id = int(pt[1])
+            prof, tier = self.prof_tiers_by_id(prof_id, tier_id)
+            assert prof is not None and tier is not None
             result.append((prof, tier))
         return result
     
@@ -269,38 +335,46 @@ def init_update_parser(parser: ArgumentParser) -> None:
     parsers.add_parser("items", help="Update item list for items used in loaded recipes")
 
 def handle_update_command (args, config: Config) -> int:
+    enchantment_id = config["data.profession_ids.enchanting"]
     data = DataService(config)
     if args.target == "realms":
-        print("Updating realms...", end=" ", flush=True)
+        info("Updating realms...")
         data.update_realms()
-        print("done")
+        info("Realms successfully updated")
     elif args.target == "professions":
-        print("Updating professions...", end=" ", flush=True)
+        info("Updating professions...")
         data.update_professions()
-        print("done")
+        info("Professions successfully updated")
     elif args.target == "recipes":
-        print("Updating recipes...", end=" ", flush=True)
+        info("Updating recipes...")
         prof_tiers = data.all_professions() if args.professions == "all" \
-                else data.config_professions if args.professions == "config" \
+                else data.config_professions() if args.professions == "config" \
                 else data.latest_professions()
+        expansions = {tier.expansion for prof, tier in prof_tiers if prof.id == enchantment_id}
         data.update_recipes(prof_tiers)
-        print("done")        
+        info("Creating disenchantment recipes...")
+        data.create_disenchantment_recipes(expansions)
+        info("Recipes successfully updated")
     elif args.target == "items":
-        print("Updating items...", end=" ", flush=True)
+        info("Updating items...")
         data.update_items()
-        print("Done")
+        info("Items successfully updated")
     else: # all
-        print("Updating realms...", end=" ", flush=True)
+        info("Updating realms...")
         data.update_realms()
-        print("done")
-        print("Updating professions...", end=" ", flush=True)
+        info("Realms successfully updated")
+        info("Updating professions...")
         data.update_professions()
-        print("done")
-        print("Updating recipes...", end=" ", flush=True)
+        info("Professions successfully updated")
+        info("Updating recipes...")
         prof_tiers = data.latest_professions()
         data.update_recipes(prof_tiers)
-        print("done")        
-        print("Updating items...", end=" ", flush=True)
+        info("Recipes successfully updated")
+        info("Updating items...")
         data.update_items()
-        print("Done")
+        info("Items successfully updated")
+        info("Creating disenchantment recipes...")
+        expansions = {tier.expansion for prof, tier in prof_tiers if prof.id == enchantment_id}
+        data.create_disenchantment_recipes(expansions)
+        info("Disenchantment recipes successfully created")
     return 0
