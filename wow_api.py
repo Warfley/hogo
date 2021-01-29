@@ -141,8 +141,7 @@ class WoWAPI:
         resp_data = resp.json()
         if "crafted_item" not in resp_data:
             items = self.search_items(resp_data["name"])
-            assert len(items) <= 1
-            if not items:
+            if len(items) != 1: # ambiguity
                 return None
             if "crafted_quantity" not in resp_data:
                 resp_data["crafted_quantity"] = {"value": 1}
@@ -158,7 +157,8 @@ class WoWAPI:
         result = self.load_recipe_list(profession, tier)
         for r in result:
             self.load_recipe_data(r)
-        return result
+        # filter out empty
+        return [recipe for recipe in result if recipe.crafted_item is not None]
     
     def load_item(self, item_id: int, expansion: int) -> Item:
         url = self.__construct_url(f"/data/wow/item/{item_id}", Namespace.STATIC)

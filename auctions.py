@@ -448,7 +448,7 @@ def init_auction_parser(parser: ArgumentParser) -> None:
     profit_parser.add_argument("--professions", "-p", nargs="+", type=str, default=["config"],
                                help="Using crafting from these professions, profession names " +\
                                     "in configured language or 'config' to read from config (default=config)")
-    profit_parser.add_argument("--vendor-items", "-v", nargs="+", type=int, help="The IDs of items that can be bought " +\
+    profit_parser.add_argument("--vendor-items", "-v", nargs="+", type=str, help="Items that can be bought " +\
                                "from the vendor. Additional to data.vendor_items config")
     profit_parser.add_argument("--buy", "-b", type=str, nargs="+", help="Items to be always bought, even if the can be crafted cheaper. Additional to auctions.buy config")
 

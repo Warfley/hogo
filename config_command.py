@@ -48,7 +48,9 @@ def handle_config_command(args, config: Config) -> int:
     if args.subcommand == "init":
         new_config = __init_config(args)
     elif args.subcommand == "update":
-        new_config = config
+        new_config = Config()
+        new_config.load()
+        new_config.update_from_args(args)
     elif args.subcommand == "get":
         val = config[args.prop]
         if val is None:
