@@ -42,12 +42,6 @@ def init_config_parser(parser: ArgumentParser) -> None:
     buy_parser = parsers.add_parser("buyitems", help="Configure the auctions.buy property, requires updated item data")
     buy_parser.add_argument("action", type=str, choices=["add", "delete"])
     buy_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
-    ignore_parser = parsers.add_parser("ignoreitems", help="Configure the auctions.ignore property, requires updated item data")
-    ignore_parser.add_argument("action", type=str, choices=["add", "delete"])
-    ignore_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
-    specific_parser = parsers.add_parser("specificitems", help="Configure the auctions.specific property, requires updated item data")
-    specific_parser.add_argument("action", type=str, choices=["add", "delete"])
-    specific_parser.add_argument("items", nargs="+", type=str, help="List of the items in the currently selected language to add/delete.")
 
 def handle_config_command(args, config: Config) -> int:
     new_config: Config = None
@@ -93,11 +87,11 @@ def handle_config_command(args, config: Config) -> int:
             new_config = __add_vendor_items(args.items, config)
         else:
             new_config = __delete_vendor_items(args.items, config)
-    elif args.subcommand in ["buyitems", "specificitems", "ignoreitems"]:
+    elif args.subcommand == "buyitems":
         if args.action == "add":
-            new_config = __add_auction_items(args.items, config, args.subcommand[:-5])
+            new_config = __add_auction_items(args.items, config, "buy")
         else:
-            new_config = __delete_auction_items(args.items, config, args.subcommand[:-5])
+            new_config = __delete_auction_items(args.items, config, "buy")
     else:
         return 1
     if new_config is not None:
