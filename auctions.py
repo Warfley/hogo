@@ -117,7 +117,7 @@ class AuctionHouse:
             for a in auctions:
                 lvl = KEY_LEVELS.get(a.item.bonus_lists[-1])
                 if lvl is None:
-                    warning(f"Unknown key level: {a.item.bonus_lists[-1]} for item {item}... Ignoring")
+                    warning(f"Unknown key level {a.item.bonus_lists[-1]} for item {item}... Ignoring")
                     continue
                 item_result[lvl] = min(item_result.get(lvl, 9999999999999), a.price)
             result[item] = item_result
@@ -215,7 +215,6 @@ class RecipeCostComputer:
     @property
     def legendary_items(self) -> Set[int]:
         return self.__legendary_items
-    
     @property
     def ah_prices(self) -> Dict[int, CombinedAuction]:
         return self.__ah_prices
@@ -234,6 +233,9 @@ class RecipeCostComputer:
     @property
     def recipe_selling_price(self) -> Dict[int, int]:
         return self.__recipe_selling_price
+    @property
+    def disenchantable_min_items(self) -> Dict[int, int]:
+        return self.__disenchantable_min_items
 
     def _build_recipe_item_cache(self) -> None:
         craftable: Dict[int, List[Recipe]] = {}
@@ -258,6 +260,10 @@ class RecipeCostComputer:
                     item_recipes = craftable.get(item.item_id, [])
                     item_recipes.append(recipe)
                     craftable[crafted_item] = item_recipes
+        # add all items that can be disenchanted
+        for disenchantable_dict in self.disenchantable_items.values():
+            for disenchantable_items in disenchantable_dict.values():
+                considerable.update([item.id for item in disenchantable_items])
         self.__craftable_items = craftable
         self.__considerable_items = considerable
         self.__legendary_items = legendary
@@ -265,8 +271,8 @@ class RecipeCostComputer:
     def _build_disenchantbale_item_cache(self) -> None:
         enchanting_id = self.config["data.profession_ids.enchanting"]
         disenchantable_classes = {
-            self.config["data.item_classes.armor"],
-            self.config["data.item_classes.weapon"]
+            self.config["data.item_classes.armor.id"],
+            self.config["data.item_classes.weapon.id"]
         }
         disenchantable_qualities = {
             ItemQuality.UNCOMMON,
@@ -274,7 +280,7 @@ class RecipeCostComputer:
             ItemQuality.EPIC
         }
         expansions = {tier.expansion for prof, tier in self.professions if prof.id == enchanting_id}
-        disenchantables: Dict[int, Dict[ItemQuality, List[Item]]]
+        disenchantables: Dict[int, Dict[ItemQuality, List[Item]]] = {}
         for item in self.data.get_items():
             if item.expansion in expansions \
                    and item.item_class in disenchantable_classes \
@@ -283,7 +289,7 @@ class RecipeCostComputer:
                 item_list = exp_disenchantables.get(item.quality, [])
                 item_list.append(item)
                 exp_disenchantables[item.quality] = item_list
-                disenchantables[item.expansion] = item_list
+                disenchantables[item.expansion] = exp_disenchantables
         self.__disenchantable_items = disenchantables
     
     def _get_vendor_prices(self, vendor_items: Set[int]) -> Dict[int, int]:
@@ -357,7 +363,7 @@ class RecipeCostComputer:
         for reagent in reagents:
             reagent_price = self._get_min_price(reagent.item_id)
             if reagent_price is None:
-                warning("Reagent: " + self.item_cache[reagent.item_id].name + " is not obtainable, skipping...")
+                warning("Reagent " + self.item_cache[reagent.item_id].name + " is not obtainable, skipping...")
                 return None
             result += reagent_price * reagent.count
         return result
@@ -375,14 +381,16 @@ class RecipeCostComputer:
         return self._compute_reagent_costs(recipe.reagents)
 
     def _compute_disenchant_production_cost(self, recipe: DisenchantRecipe, trace: Set[int], computed: Set[int]) -> Union[int, List[Tuple[Recipe, Set[int]]]]:
+        if recipe.reagent_quality not in self.disenchantable_items[recipe.expansion]:
+            return None
         disenchantable = self.disenchantable_items[recipe.expansion][recipe.reagent_quality]
         requirements = self._get_requirements(recipe.id, [item.id for item in disenchantable], trace, computed)
         if requirements:
             return [(recipe, trace)] + requirements
         min_price, min_item = None, None
         for item in disenchantable:
-            item_price = self._compute_reagent_costs([ItemStack(item.id, 1)])
-            if item_price is not None and min_price is None and item_price < min_price:
+            item_price = self._compute_reagent_costs([ItemStack(1, item.id)])
+            if item_price is not None and (min_price is None or item_price < min_price):
                 min_price = item_price
                 min_item = item
         self.__disenchantable_min_items[recipe.id] = min_item.id
@@ -410,7 +418,7 @@ class RecipeCostComputer:
                             else self._compute_disenchant_production_cost(recipe, trace, computed) if isinstance(recipe, DisenchantRecipe) \
                             else None
             if computation_result is None:
-                warning("Can't compute production costs for recipe: " + recipe.name + " skipping...")
+                warning("Can't compute production costs for recipe " + recipe.name + " skipping...")
                 # Skip this if it comes up again
                 computed.add(recipe.id)
                 continue
@@ -422,7 +430,7 @@ class RecipeCostComputer:
             if isinstance(recipe, NormalRecipe):
                 self._update_min_price(recipe.crafted_item, recipe)
             elif isinstance(recipe, LegendaryRecipe):
-                self._update_min_price(ItemStack(recipe.item_id, 1), recipe)
+                self._update_min_price(ItemStack(1, recipe.item_id), recipe)
             else:
                 for item_stack in recipe.crafted_items:
                     self._update_min_price(item_stack, recipe)
@@ -530,6 +538,17 @@ def print_recipe(recipe: Recipe, costs: int, price: int, computer: RecipeCostCom
                              else f"Crafting: {reagent_price.name}"
             reagent_price_total = reagent_price_value * reagent.count
             print(f"    {reagent_item.name}: {price_to_string(reagent_price_value)} * {reagent.count} ({price_to_string(reagent_price_total)}) from {reagent_price_label}")
+    else:
+        reagent_id = computer.disenchantable_min_items[recipe.id]
+        reagent = computer.item_cache[reagent_id]
+        reagent_price = computer.min_prices[reagent_id]
+        reagent_price_value = reagent_price if isinstance(reagent_price, int) \
+                            else reagent_price.price if isinstance(reagent_price, CombinedAuction) \
+                            else computer.recipe_production_costs[reagent_price.id]
+        reagent_price_label = "Vendor" if isinstance(reagent_price, int) \
+                            else "AH" if isinstance(reagent_price, CombinedAuction) \
+                            else f"Crafting: {reagent_price.name}"
+        print(f"    {reagent.name}: {price_to_string(reagent_price_value)} from {reagent_price_label}")
 
 def handle_profit(args, config: Config, data: DataService, ah: AuctionHouse) -> int:
     professions: Set[Tuple[int, int]] = __get_professions(args.professions, config, data)
@@ -544,7 +563,7 @@ def handle_profit(args, config: Config, data: DataService, ah: AuctionHouse) -> 
 
     selling_price = computer.recipe_selling_price
     for recipe in sorted(computer.recipes, key=lambda recipe: not isinstance(recipe,NormalRecipe)):
-        if recipe.id not in selling_price:
+        if recipe.id not in selling_price or recipe.id not in computer.recipe_production_costs:
             continue
         costs = computer.recipe_production_costs[recipe.id]
         price = selling_price[recipe.id]

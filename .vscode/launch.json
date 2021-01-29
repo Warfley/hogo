@@ -19,7 +19,15 @@
             "program": "hogo",
             "args": ["auctions", "-u", "profit", "-p", "Lederverarbeitung der Schattenlande"],
             "console": "integratedTerminal"
-        }
+        },
+        {
+            "name": "Verzauberkunst",
+            "type": "python",
+            "request": "launch",
+            "program": "hogo",
+            "args": ["auctions", "-u", "profit", "-p", "Verzauberkunst der Schattenlande"],
+            "console": "integratedTerminal"
+        },
         {
             "name": "Config",
             "type": "python",
