@@ -222,7 +222,7 @@ class DataService:
         enchantment_mats = self.__get_enchantment_mats_by_expansion(expansions, item_cache)
         recipes: List[DisenchantRecipe] = []
         for expansion, mats in enchantment_mats.items():
-            for quality in mats.keys():
+            for quality in quality_ids.keys():
                 tier = expansion_tiers[expansion]
                 recipe_id = -(expansion * 10 + quality_ids[quality])
                 recipe_name = f"{tier.name}: Disenchanting {quality.value}"
